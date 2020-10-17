@@ -1,0 +1,206 @@
+openapi: "3.0.2"
+
+info:
+  title: content
+  version: "1.0.0"
+  description: P2P content proxy to HTTP stream.
+  contact:
+    name: WinPooh32
+    email: winpooh32@yandex.ru
+
+servers:
+  - url: http://127.0.0.1/
+
+tags:
+  - name: Service
+  - name: Content
+  - name: Settings
+
+paths:
+  /ping:
+    get:
+      operationId: ping
+      summary: Test API availablity.
+      tags:
+        - Service
+      responses:
+        "200":
+          description: OK
+        default:
+          $ref: "#/components/responses/error"
+
+  /content/{hash}/{path}:
+    get:
+      operationId: getContent
+      summary: Get file content.
+      tags:
+        - Content
+      parameters:
+        - $ref: "#/components/parameters/hash"
+        - $ref: "#/components/parameters/path"
+      responses:
+        "200":
+          description: A file.
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
+        default:
+          $ref: "#/components/responses/error"
+
+  /content/{hash}:
+    put:
+      operationId: addHash
+      summary: Add hash for tracking data belongs to it.
+      tags:
+        - Content
+      parameters:
+        - $ref: "#/components/parameters/hash"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/info"
+        default:
+          $ref: "#/components/responses/error"
+
+  /settings:
+    get:
+      operationId: getSettings
+      summary: Get current service settings.
+      tags:
+        - Settings
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/settings"
+        default:
+          $ref: "#/components/responses/error"
+    put:
+      operationId: applySettings
+      summary: Apply new settings.
+      tags:
+        - Settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/settings"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/settings"
+        default:
+          $ref: "#/components/responses/error"
+
+components:
+  parameters:
+    hash:
+      in: path
+      schema:
+        $ref: "#/components/schemas/hash"
+      name: hash
+      required: true
+
+    path:
+      in: path
+      schema:
+        $ref: "#/components/schemas/path"
+      name: path
+      required: true
+
+  responses:
+    error:
+      description: Error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/error"
+
+  schemas:
+    error:
+      description: Error response body.
+      type: object
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+        error:
+          type: string
+      required:
+        - error
+        - status
+
+    hash:
+      description: SHA-1 hex encoded hash string.
+      type: string
+
+    path:
+      description: file path.
+      type: string
+
+    info:
+      description: List of torrent files.
+      type: object
+      additionalProperties: false
+      properties:
+        header:
+          type: object
+          properties:
+            name:
+              type: string
+            hash:
+              type: string
+          required:
+            - name
+            - hash
+        content:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              path:
+                type: array
+                items:
+                  type: string
+              size:
+                type: integer
+                minimum: 0
+            required:
+              - name
+              - path
+              - size
+      required:
+        - header
+        - content
+
+    settings:
+      description: Service settings.
+      type: object
+      additionalProperties: false
+      properties:
+        max_connections:
+          type: integer
+          minimum: 0
+        cache_size:
+          type: integer
+          minimum: 0
+        read_ahead:
+          type: integer
+          minimum: 0
+        max_active:
+          type: integer
+          minimum: 0
