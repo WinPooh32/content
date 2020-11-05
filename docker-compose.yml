@@ -1,0 +1,10 @@
+version: '3.2'
+
+services:
+  content:
+    build:
+      context: ./
+      dockerfile: ./Dockerfile
+    volumes:
+      - ./data:/data
+
