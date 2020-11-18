@@ -72,7 +72,7 @@ func main() {
 
 	trackers, err = readTrackers(*trackersPath)
 	if err != nil {
-		log.Warn().Msgf("failed to read trackers list: %w", err)
+		log.Warn().Msgf("failed to read trackers list: %s", err)
 	}
 
 	a, err = app.New(nil, trackers)
