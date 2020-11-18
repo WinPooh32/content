@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/anacrolix/torrent"
-	"github.com/anacrolix/torrent/metainfo"
 	"github.com/asaskevich/govalidator"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/render"
@@ -65,13 +64,14 @@ func (api *API) senttingsPUT(w http.ResponseWriter, r *http.Request) {
 
 func (api *API) contentGET(w http.ResponseWriter, r *http.Request) {
 	var err error
+	var t *torrent.Torrent
 
 	var hex string = r.Context().Value(paramHash).(string)
 	var path string = r.Context().Value(paramPath).(string)
 
-	var t, ok = api.app.Torrent(hex)
-	if !ok {
-		_ = render.Render(w, r, ErrNotFound(fmt.Errorf("not found: %s", hex)))
+	t, err = api.app.TrackHash(r.Context(), hex)
+	if err != nil {
+		_ = render.Render(w, r, ErrInternal(fmt.Errorf("failed to track torrent: %w", err)))
 		return
 	}
 
@@ -93,19 +93,12 @@ func (api *API) contentGET(w http.ResponseWriter, r *http.Request) {
 func (api *API) contentPUT(w http.ResponseWriter, r *http.Request) {
 	var err error
 	var t *torrent.Torrent
-	var magnet metainfo.Magnet
 
 	var hex = r.Context().Value(paramHash).(string)
 
-	magnet, err = metainfo.ParseMagnetURI(fmt.Sprintf("magnet:?xt=urn:btih:%s", hex))
+	t, err = api.app.TrackHash(r.Context(), hex)
 	if err != nil {
-		_ = render.Render(w, r, ErrInternal(fmt.Errorf("failed to parse magnet uri: %w", err)))
-		return
-	}
-
-	t, err = api.app.TrackMagnet(r.Context(), &magnet)
-	if err != nil {
-		_ = render.Render(w, r, ErrInternal(fmt.Errorf("failed to track magnet: %w", err)))
+		_ = render.Render(w, r, ErrInternal(fmt.Errorf("failed to track torrent: %w", err)))
 		return
 	}
 

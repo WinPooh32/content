@@ -34,6 +34,24 @@ type App struct {
 	trackers [][]string
 }
 
+func (app *App) TrackHash(ctx context.Context, hash string) (*torrent.Torrent, error) {
+	var err error
+	var t *torrent.Torrent
+	var magnet metainfo.Magnet
+
+	magnet, err = metainfo.ParseMagnetURI(fmt.Sprintf("magnet:?xt=urn:btih:%s", hash))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse magnet uri: %w", err)
+	}
+
+	t, err = app.TrackMagnet(ctx, &magnet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to track magnet: %w", err)
+	}
+
+	return t, nil
+}
+
 func (app *App) TrackMagnet(ctx context.Context, magnet *metainfo.Magnet) (*torrent.Torrent, error) {
 	var err error
 	var t *torrent.Torrent
