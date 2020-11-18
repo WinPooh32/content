@@ -9,6 +9,6 @@ RUN GOOS=linux go build -mod=vendor -o content
 FROM alpine:3
 ENV PORT="9090"
 RUN apk --no-cache add ca-certificates libgcc libstdc++
-WORKDIR /app
-COPY --from=builder /app/content/src/cmd/service .
-CMD /app/content -port=${PORT} -host=0.0.0.0
+COPY --from=builder /app/content/src/cmd/service /app
+WORKDIR /data
+CMD /app/content -port=${PORT} -host=0.0.0.0 -trackers=/app/trackers.txt
