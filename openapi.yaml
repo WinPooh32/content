@@ -2,7 +2,7 @@ openapi: "3.0.2"
 
 info:
   title: content
-  version: "1.0.0"
+  version: "1.0.1"
   description: P2P content proxy to HTTP stream.
   contact:
     name: WinPooh32
@@ -50,9 +50,9 @@ paths:
           $ref: "#/components/responses/error"
 
   /content/{hash}:
-    put:
-      operationId: addHash
-      summary: Add hash for tracking data belongs to it.
+    get:
+      operationId: getFiles
+      summary: Returns list of files by hash.
       tags:
         - Content
       parameters:

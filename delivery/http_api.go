@@ -44,7 +44,7 @@ func NewHttpAPI(app *app.App) (chi.Router, error) {
 
 	r.With(hash).Route(fmt.Sprintf("/content/{%s}", paramHash), func(r chi.Router) {
 		r.With(path).Get(fmt.Sprintf("/{%s}", paramPath), api.contentGET)
-		r.Put("/", api.contentPUT)
+		r.Get("/", api.contentPUT)
 		r.Get("/info", api.contentInfoGET)
 	})
 
