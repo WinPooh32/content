@@ -7,4 +7,5 @@ services:
       dockerfile: ./Dockerfile
     volumes:
       - ./data:/data
-
+    ports:
+      - 9090:9090

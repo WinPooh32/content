@@ -7,8 +7,8 @@ WORKDIR /app/content/src/cmd/service
 RUN GOOS=linux go build -mod=vendor -o content
 
 FROM alpine:3
-ENV SRC_ROOT=${SRC_ROOT}
+ENV PORT="9090"
 RUN apk --no-cache add ca-certificates libgcc libstdc++
 WORKDIR /app
 COPY --from=builder /app/content/src/cmd/service .
-ENTRYPOINT ["/app/content"]
+CMD /app/content -port=${PORT} -host=0.0.0.0
