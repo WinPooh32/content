@@ -23,13 +23,6 @@ const (
 	dbBucketInfo = "info"
 )
 
-var trackers = [][]string{
-	{"udp://opentor.org:2710", "https://bt.t-ru.org/ann?magnet", "http://bt.t-ru.org/ann?magnet"},
-	{"udp://tracker.coppersurfer.tk:6969/announce", "udp://explodie.org:6969", "udp://tracker.empire-js.us:1337", "udp://tracker.leechers-paradise.org:6969", "udp://tracker.opentrackr.org:1337"},
-	{"wss://tracker.btorrent.xyz", "wss://tracker.fastcast.nz", "wss://tracker.openwebtorrent.com"},
-	{"http://retracker.local/announce"},
-}
-
 type App struct {
 	client *torrent.Client
 	sets   *model.Settings
@@ -37,6 +30,8 @@ type App struct {
 
 	torrents map[string]*torrent.Torrent
 	mu       sync.RWMutex
+
+	trackers [][]string
 }
 
 func (app *App) TrackMagnet(ctx context.Context, magnet *metainfo.Magnet) (*torrent.Torrent, error) {
@@ -44,7 +39,7 @@ func (app *App) TrackMagnet(ctx context.Context, magnet *metainfo.Magnet) (*torr
 	var t *torrent.Torrent
 
 	var spec = &torrent.TorrentSpec{
-		Trackers:    append(trackers, magnet.Trackers),
+		Trackers:    append(app.trackers, magnet.Trackers),
 		DisplayName: magnet.DisplayName,
 		InfoHash:    magnet.InfoHash,
 	}
@@ -226,7 +221,7 @@ func openDB(path string) (*bolt.DB, error) {
 	return db, nil
 }
 
-func New(sets *model.Settings) (*App, error) {
+func New(sets *model.Settings, trackers []string) (*App, error) {
 	var err error
 	var t *torrent.Client
 	var defaultSets model.Settings
@@ -243,7 +238,7 @@ func New(sets *model.Settings) (*App, error) {
 
 	store, err = openDB(dbName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create new torrent client: %w", err)
+		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
 	var app = &App{
@@ -251,6 +246,7 @@ func New(sets *model.Settings) (*App, error) {
 		sets:     &defaultSets,
 		db:       store,
 		torrents: make(map[string]*torrent.Torrent),
+		trackers: [][]string{{"http://retracker.local/announce"}, trackers},
 	}
 
 	return app, app.load()
