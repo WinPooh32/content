@@ -4,15 +4,19 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"content/model"
 
 	anacrolixlog "github.com/anacrolix/log"
+	"github.com/anacrolix/missinggo/v2/filecache"
+	"github.com/anacrolix/missinggo/v2/resource"
 	"github.com/anacrolix/sync"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/mse"
+	"github.com/anacrolix/torrent/storage"
 	"github.com/rs/zerolog/log"
 
 	"github.com/boltdb/bolt"
@@ -57,7 +61,7 @@ func (app *App) TrackMagnet(ctx context.Context, magnet *metainfo.Magnet) (*torr
 	var t *torrent.Torrent
 
 	var spec = &torrent.TorrentSpec{
-		Trackers:    append(app.trackers, magnet.Trackers),
+		Trackers:    append([][]string{magnet.Trackers}, app.trackers...),
 		DisplayName: magnet.DisplayName,
 		InfoHash:    magnet.InfoHash,
 	}
@@ -189,7 +193,8 @@ func (app *App) load() error {
 	})
 }
 
-func newTorrentSettings(sets *model.Settings) *torrent.ClientConfig {
+func newTorrentSettings(dir string, sets *model.Settings) (*torrent.ClientConfig, error) {
+	var err error
 	var cfg *torrent.ClientConfig = torrent.NewDefaultClientConfig()
 
 	// Take random free port.
@@ -197,6 +202,11 @@ func newTorrentSettings(sets *model.Settings) *torrent.ClientConfig {
 
 	// Enable seeding.
 	cfg.Seed = true
+
+	// Connecttions per torrent.
+	cfg.EstablishedConnsPerTorrent = int(sets.MaxConnections)
+
+	cfg.DisableAggressiveUpload = true
 
 	// Header obfuscation.
 	cfg.HeaderObfuscationPolicy = torrent.HeaderObfuscationPolicy{
@@ -213,7 +223,41 @@ func newTorrentSettings(sets *model.Settings) *torrent.ClientConfig {
 	cfg.Debug = false
 	cfg.Logger = anacrolixlog.Discard
 
-	return cfg
+	// File cache.
+	var capacity int64
+	if sets.CacheSize > 0 {
+		capacity = sets.CacheSize
+	} else {
+		capacity = -1
+	}
+
+	var res resource.Provider
+	res, err = makeResourceProvider(dir, capacity)
+	if err != nil {
+		return nil, fmt.Errorf("make resource provider: %w", err)
+	}
+
+	cfg.DefaultStorage = makeStorageProvider(res)
+
+	return cfg, nil
+}
+
+func makeResourceProvider(dir string, capacity int64) (resource.Provider, error) {
+	var err error
+	var fc *filecache.Cache
+
+	fc, err = filecache.NewCache(dir)
+	if err != nil {
+		return nil, fmt.Errorf("new file cache: %w", err)
+	}
+
+	fc.SetCapacity(capacity)
+
+	return fc.AsResourceProvider(), nil
+}
+
+func makeStorageProvider(res resource.Provider) storage.ClientImpl {
+	return storage.NewResourcePieces(res)
 }
 
 func openDB(path string) (*bolt.DB, error) {
@@ -239,29 +283,35 @@ func openDB(path string) (*bolt.DB, error) {
 	return db, nil
 }
 
-func New(sets *model.Settings, trackers []string) (*App, error) {
+func New(dir string, sets *model.Settings, trackers []string) (*App, error) {
 	var err error
+	var cfg *torrent.ClientConfig
 	var t *torrent.Client
-	var defaultSets model.Settings
+	var newSets model.Settings
 	var store *bolt.DB
 
 	if sets != nil {
-		defaultSets = *sets
+		newSets = *sets
 	}
 
-	t, err = torrent.NewClient(newTorrentSettings(&defaultSets))
+	cfg, err = newTorrentSettings(dir, &newSets)
+	if err != nil {
+		return nil, fmt.Errorf("init torrent settings: %w", err)
+	}
+
+	t, err = torrent.NewClient(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create new torrent client: %w", err)
 	}
 
-	store, err = openDB(dbName)
+	store, err = openDB(filepath.Join(dir, dbName))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
 	var app = &App{
 		client:   t,
-		sets:     &defaultSets,
+		sets:     &newSets,
 		db:       store,
 		torrents: make(map[string]*torrent.Torrent),
 		trackers: [][]string{{"http://retracker.local/announce"}, trackers},
