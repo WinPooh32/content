@@ -26,10 +26,11 @@ github.com/anacrolix/missinggo/slices
 github.com/anacrolix/missinggo/x
 # github.com/anacrolix/missinggo/perf v1.0.0
 github.com/anacrolix/missinggo/perf
-# github.com/anacrolix/missinggo/v2 v2.4.1-0.20200419051441-747d9d7544c6
+# github.com/anacrolix/missinggo/v2 v2.5.0
 github.com/anacrolix/missinggo/v2
 github.com/anacrolix/missinggo/v2/bitmap
 github.com/anacrolix/missinggo/v2/conntrack
+github.com/anacrolix/missinggo/v2/filecache
 github.com/anacrolix/missinggo/v2/iter
 github.com/anacrolix/missinggo/v2/pproffd
 github.com/anacrolix/missinggo/v2/prioritybitmap
