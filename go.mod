@@ -1,4 +1,4 @@
-module content
+module github.com/WinPooh32/content
 
 go 1.13
 

@@ -2,15 +2,16 @@ package main
 
 import (
 	"bufio"
-	"content/app"
-	"content/delivery"
-	"content/model"
-	"content/service"
 	"flag"
 	"fmt"
 	"net/url"
 	"os"
 	"os/signal"
+
+	"github.com/WinPooh32/content/app"
+	"github.com/WinPooh32/content/delivery"
+	"github.com/WinPooh32/content/model"
+	"github.com/WinPooh32/content/service"
 
 	"github.com/go-chi/chi"
 	"github.com/rs/zerolog"

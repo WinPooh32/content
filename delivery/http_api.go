@@ -1,13 +1,14 @@
 package delivery
 
 import (
-	"content/app"
-	"content/model"
 	"context"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/WinPooh32/content/app"
+	"github.com/WinPooh32/content/model"
 
 	"github.com/anacrolix/torrent"
 	"github.com/asaskevich/govalidator"

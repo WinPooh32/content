@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"content/model"
+	"github.com/WinPooh32/content/model"
 
 	anacrolixlog "github.com/anacrolix/log"
 	"github.com/anacrolix/missinggo/v2/filecache"
