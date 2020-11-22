@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/anacrolix/torrent"
@@ -42,7 +43,7 @@ func NewHttpAPI(app *app.App) (chi.Router, error) {
 	})
 
 	r.With(hash).Route(fmt.Sprintf("/content/{%s}", paramHash), func(r chi.Router) {
-		r.With(path).Get(fmt.Sprintf("/{%s}", paramPath), api.contentGET)
+		r.With(path).Get("/*", api.contentGET)
 		r.Get("/", api.contentPUT)
 		r.Get("/info", api.contentInfoGET)
 	})
@@ -68,6 +69,8 @@ func (api *API) contentGET(w http.ResponseWriter, r *http.Request) {
 
 	var hex string = r.Context().Value(paramHash).(string)
 	var path string = r.Context().Value(paramPath).(string)
+
+	log.Info().Msgf("GET %s/%s", hex, path)
 
 	t, err = api.app.TrackHash(r.Context(), hex)
 	if err != nil {
@@ -147,7 +150,13 @@ func hash(next http.Handler) http.Handler {
 
 func path(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var path = chi.URLParam(r, "*")
+		var path, err = url.QueryUnescape(chi.URLParam(r, "*"))
+		if err != nil {
+			if err = render.Render(w, r, ErrBadRequest(fmt.Errorf("url unescape"))); err != nil {
+				log.Error().Err(err).Msgf("chi render")
+				return
+			}
+		}
 
 		if !govalidator.IsRequestURI("/" + path) {
 			if err := render.Render(w, r, ErrBadRequest(fmt.Errorf("invalid path"))); err != nil {
