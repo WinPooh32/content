@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"content/app"
 	"content/delivery"
+	"content/model"
 	"content/service"
 	"flag"
 	"fmt"
@@ -44,6 +45,7 @@ func readTrackers(path string) ([]string, error) {
 			continue
 		}
 
+		log.Debug().Msgf("add tracker: %s", line)
 		trackers = append(trackers, line)
 	}
 
@@ -60,12 +62,26 @@ func main() {
 
 	var s = service.New()
 
+	// Cmd flags.
 	var host *string = flag.String("host", "127.0.0.1", "host")
 	var port *uint = flag.Uint("port", 0, "port")
+	var dir *string = flag.String("dir", "download", "root working directory")
+
 	var trackersPath *string = flag.String("trackers", "trackers.txt", "path to trackers list file")
+	var cacheCapacity *int64 = flag.Int64("size-cache", 10, "files cache capacity GiB")
+	var readAhead *int64 = flag.Int64("size-readahead", 4, "readahead size MiB")
+	var maxConn *int64 = flag.Int64("max-connections", 50, "max connection per torrent")
+	var maxActive *int64 = flag.Int64("max-active", 4, "max active torrents")
 
 	// Parse console arguments.
 	flag.Parse()
+
+	var settings = model.Settings{
+		CacheSize:      *cacheCapacity << 30,
+		ReadAheadSize:  *readAhead << 20,
+		MaxConnections: *maxConn,
+		MaxActive:      *maxActive,
+	}
 
 	var a *app.App
 	var trackers []string
@@ -75,7 +91,7 @@ func main() {
 		log.Warn().Msgf("failed to read trackers list: %s", err)
 	}
 
-	a, err = app.New(nil, trackers)
+	a, err = app.New(*dir, &settings, trackers)
 	if err != nil {
 		log.Fatal().Msgf("failed to create app: %s", err)
 	}
