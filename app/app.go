@@ -304,6 +304,11 @@ func New(dir string, sets *model.Settings, trackers []string) (*App, error) {
 		return nil, fmt.Errorf("failed to create new torrent client: %w", err)
 	}
 
+	err = os.MkdirAll(dir, os.ModePerm)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create dir: %w", err)
+	}
+
 	store, err = openDB(filepath.Join(dir, dbName))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
