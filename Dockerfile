@@ -1,4 +1,4 @@
-FROM golang:1.15-alpine as builder
+FROM golang:1.16-alpine as builder
 # install gcc
 RUN apk --no-cache add make build-base
 WORKDIR /app/content/src
