@@ -39,6 +39,10 @@ type App struct {
 	trackers [][]string
 }
 
+func (app *App) ReadaheadSize() int64 {
+	return app.sets.ReadAheadSize
+}
+
 func (app *App) TrackHash(ctx context.Context, hash string) (*torrent.Torrent, error) {
 	var err error
 	var t *torrent.Torrent

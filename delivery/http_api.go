@@ -87,7 +87,7 @@ func (api *API) contentGET(w http.ResponseWriter, r *http.Request) {
 	case <-t.GotInfo():
 	}
 
-	err = serveTorrentFile(w, r, t, path)
+	err = api.serveTorrentFile(w, r, t, path)
 	if err != nil {
 		_ = render.Render(w, r, ErrInternal(fmt.Errorf("failed to serve torrent file: %w", err)))
 		return

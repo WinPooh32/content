@@ -10,7 +10,7 @@ import (
 	"github.com/anacrolix/torrent"
 )
 
-func serveTorrentFile(w http.ResponseWriter, r *http.Request, t *torrent.Torrent, path string) error {
+func (api *API) serveTorrentFile(w http.ResponseWriter, r *http.Request, t *torrent.Torrent, path string) error {
 	var name string
 	var file *torrent.File
 
@@ -43,10 +43,10 @@ func serveTorrentFile(w http.ResponseWriter, r *http.Request, t *torrent.Torrent
 	var reader = file.NewReader()
 	defer reader.Close()
 
-	return serveContent(w, r, reader, name, (file.Length()*10)/100)
+	return api.serveContent(w, r, reader, name, api.app.ReadaheadSize())
 }
 
-func serveContent(w http.ResponseWriter, r *http.Request, reader torrent.Reader, name string, readahead int64) error {
+func (api *API) serveContent(w http.ResponseWriter, r *http.Request, reader torrent.Reader, name string, readahead int64) error {
 	var err error
 
 	// Don't wait for pieces to complete and be verified.
