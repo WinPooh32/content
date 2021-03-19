@@ -1,3 +1,7 @@
+http://tracker.trackerfix.com:80/announce
+udp://9.rarbg.me:2900
+udp://9.rarbg.to:2770
+udp://9.rarbg.to:2720
 udp://opentor.org:2710
 https://bt.t-ru.org/ann?magnet
 http://bt.t-ru.org/ann?magnet
