@@ -205,13 +205,8 @@ func newTorrentSettings(dir string, sets *model.Settings) (*torrent.ClientConfig
 	// Take random free port.
 	cfg.ListenPort = 0
 
-	// Enable seeding.
-	cfg.Seed = true
-
 	// Connecttions per torrent.
 	cfg.EstablishedConnsPerTorrent = int(sets.MaxConnections)
-
-	cfg.DisableAggressiveUpload = true
 
 	// Header obfuscation.
 	cfg.HeaderObfuscationPolicy = torrent.HeaderObfuscationPolicy{
@@ -222,7 +217,7 @@ func newTorrentSettings(dir string, sets *model.Settings) (*torrent.ClientConfig
 	// Force encryption.
 	cfg.CryptoProvides = mse.CryptoMethodRC4
 
-	cfg.DefaultRequestStrategy = torrent.RequestStrategyFastest()
+	cfg.DefaultRequestStrategy = torrent.RequestStrategyFuzzing()
 
 	// Torrent debug.
 	cfg.Debug = false
