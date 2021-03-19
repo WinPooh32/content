@@ -24,6 +24,7 @@ import (
 	"github.com/anacrolix/missinggo/slices"
 	"github.com/anacrolix/missinggo/v2/pproffd"
 	"github.com/anacrolix/sync"
+	"github.com/anacrolix/torrent/internal/limiter"
 	"github.com/anacrolix/torrent/tracker"
 	"github.com/anacrolix/torrent/webtorrent"
 	"github.com/davecgh/go-spew/spew"
@@ -78,7 +79,8 @@ type Client struct {
 	numHalfOpen     int
 
 	websocketTrackers websocketTrackers
-	activeAnnounces   map[string]struct{}
+
+	activeAnnounceLimiter limiter.Instance
 }
 
 type ipStr string
@@ -185,6 +187,7 @@ func NewClient(cfg *ClientConfig) (cl *Client, err error) {
 		torrents:          make(map[metainfo.Hash]*Torrent),
 		dialRateLimiter:   rate.NewLimiter(10, 10),
 	}
+	cl.activeAnnounceLimiter.SlotsPerKey = 2
 	go cl.acceptLimitClearer()
 	cl.initLogger()
 	defer func() {
@@ -455,7 +458,7 @@ func (cl *Client) rejectAccepted(conn net.Conn) error {
 	return nil
 }
 
-func (cl *Client) acceptConnections(l net.Listener) {
+func (cl *Client) acceptConnections(l Listener) {
 	for {
 		conn, err := l.Accept()
 		torrent.Add("client listener accepts", 1)
@@ -674,7 +677,7 @@ func (cl *Client) initiateProtocolHandshakes(
 	nc net.Conn,
 	t *Torrent,
 	outgoing, encryptHeader bool,
-	remoteAddr net.Addr,
+	remoteAddr PeerRemoteAddr,
 	network, connString string,
 ) (
 	c *PeerConn, err error,
@@ -696,7 +699,7 @@ func (cl *Client) initiateProtocolHandshakes(
 }
 
 // Returns nil connection and nil error if no connection could be established for valid reasons.
-func (cl *Client) establishOutgoingConnEx(t *Torrent, addr net.Addr, obfuscatedHeader bool) (*PeerConn, error) {
+func (cl *Client) establishOutgoingConnEx(t *Torrent, addr PeerRemoteAddr, obfuscatedHeader bool) (*PeerConn, error) {
 	dialCtx, cancel := context.WithTimeout(context.Background(), func() time.Duration {
 		cl.rLock()
 		defer cl.rUnlock()
@@ -720,7 +723,7 @@ func (cl *Client) establishOutgoingConnEx(t *Torrent, addr net.Addr, obfuscatedH
 
 // Returns nil connection and nil error if no connection could be established
 // for valid reasons.
-func (cl *Client) establishOutgoingConn(t *Torrent, addr net.Addr) (c *PeerConn, err error) {
+func (cl *Client) establishOutgoingConn(t *Torrent, addr PeerRemoteAddr) (c *PeerConn, err error) {
 	torrent.Add("establish outgoing connection", 1)
 	obfuscatedHeaderFirst := cl.config.HeaderObfuscationPolicy.Preferred
 	c, err = cl.establishOutgoingConnEx(t, addr, obfuscatedHeaderFirst)
@@ -745,7 +748,7 @@ func (cl *Client) establishOutgoingConn(t *Torrent, addr net.Addr) (c *PeerConn,
 
 // Called to dial out and run a connection. The addr we're given is already
 // considered half-open.
-func (cl *Client) outgoingConnection(t *Torrent, addr net.Addr, ps PeerSource, trusted bool) {
+func (cl *Client) outgoingConnection(t *Torrent, addr PeerRemoteAddr, ps PeerSource, trusted bool) {
 	cl.dialRateLimiter.Wait(context.Background())
 	c, err := cl.establishOutgoingConn(t, addr)
 	cl.lock()
@@ -798,10 +801,11 @@ func (cl *Client) initiateHandshakes(c *PeerConn, t *Torrent) error {
 	return nil
 }
 
-// Calls f with any secret keys.
+// Calls f with any secret keys. Note that it takes the Client lock, and so must be used from code
+// that won't also try to take the lock. This saves us copying all the infohashes everytime.
 func (cl *Client) forSkeys(f func([]byte) bool) {
-	cl.lock()
-	defer cl.unlock()
+	cl.rLock()
+	defer cl.rUnlock()
 	if false { // Emulate the bug from #114
 		var firstIh InfoHash
 		for ih := range cl.torrents {
@@ -822,11 +826,18 @@ func (cl *Client) forSkeys(f func([]byte) bool) {
 	}
 }
 
+func (cl *Client) handshakeReceiverSecretKeys() mse.SecretKeyIter {
+	if ret := cl.config.Callbacks.ReceiveEncryptedHandshakeSkeys; ret != nil {
+		return ret
+	}
+	return cl.forSkeys
+}
+
 // Do encryption and bittorrent handshakes as receiver.
 func (cl *Client) receiveHandshakes(c *PeerConn) (t *Torrent, err error) {
 	defer perf.ScopeTimerErr(&err)()
 	var rw io.ReadWriter
-	rw, c.headerEncrypted, c.cryptoMethod, err = handleEncryption(c.rw(), cl.forSkeys, cl.config.HeaderObfuscationPolicy, cl.config.CryptoSelector)
+	rw, c.headerEncrypted, c.cryptoMethod, err = handleEncryption(c.rw(), cl.handshakeReceiverSecretKeys(), cl.config.HeaderObfuscationPolicy, cl.config.CryptoSelector)
 	c.setRW(rw)
 	if err == nil || err == mse.ErrNoSecretKeyMatch {
 		if c.headerEncrypted {
@@ -844,7 +855,7 @@ func (cl *Client) receiveHandshakes(c *PeerConn) (t *Torrent, err error) {
 		return
 	}
 	if cl.config.HeaderObfuscationPolicy.RequirePreferred && c.headerEncrypted != cl.config.HeaderObfuscationPolicy.Preferred {
-		err = errors.New("connection not have required header obfuscation")
+		err = errors.New("connection does not have required header obfuscation")
 		return
 	}
 	ih, err := cl.connBtHandshake(c, nil)
@@ -884,7 +895,7 @@ func (cl *Client) runReceivedConn(c *PeerConn) {
 			"error receiving handshakes on %v: %s", c, err,
 		).SetLevel(log.Debug).
 			Add(
-				"network", c.network,
+				"network", c.Network,
 			).Log(cl.logger)
 		torrent.Add("error receiving handshake", 1)
 		cl.lock()
@@ -951,9 +962,12 @@ func (cl *Client) sendInitialMessages(conn *PeerConn, torrent *Torrent) {
 					M: map[pp.ExtensionName]pp.ExtensionNumber{
 						pp.ExtensionNameMetadata: metadataExtendedId,
 					},
-					V:            cl.config.ExtendedHandshakeClientVersion,
-					Reqq:         64, // TODO: Really?
-					YourIp:       pp.CompactIp(addrIpOrNil(conn.RemoteAddr)),
+					V: cl.config.ExtendedHandshakeClientVersion,
+					// If peer requests are buffered on read, this instructs the amount of memory
+					// that might be used to cache pending writes. Assuming 512KiB cached for
+					// sending, for 16KiB chunks.
+					Reqq:         1 << 5,
+					YourIp:       pp.CompactIp(conn.remoteIp()),
 					Encryption:   cl.config.HeaderObfuscationPolicy.Preferred || !cl.config.HeaderObfuscationPolicy.RequirePreferred,
 					Port:         cl.incomingPeerPort(),
 					MetadataSize: torrent.metadataSize(),
@@ -1048,7 +1062,7 @@ func (cl *Client) gotMetadataExtensionMsg(payload []byte, t *Torrent, c *PeerCon
 	}
 }
 
-func (cl *Client) badPeerAddr(addr net.Addr) bool {
+func (cl *Client) badPeerAddr(addr PeerRemoteAddr) bool {
 	if ipa, ok := tryIpPortFromNetAddr(addr); ok {
 		return cl.badPeerIPPort(ipa.IP, ipa.Port)
 	}
@@ -1085,7 +1099,8 @@ func (cl *Client) newTorrent(ih metainfo.Hash, specStorage storage.ClientImpl) (
 		peers: prioritizedPeers{
 			om: btree.New(32),
 			getPrio: func(p PeerInfo) peerPriority {
-				return bep40PriorityIgnoreError(cl.publicAddr(addrIpOrNil(p.Addr)), p.addr())
+				ipPort := p.addr()
+				return bep40PriorityIgnoreError(cl.publicAddr(ipPort.IP), ipPort)
 			},
 		},
 		conns: make(map[*PeerConn]struct{}, 2*cl.config.EstablishedConnsPerTorrent),
@@ -1100,7 +1115,7 @@ func (cl *Client) newTorrent(ih metainfo.Hash, specStorage storage.ClientImpl) (
 		metadataChanged: sync.Cond{
 			L: cl.locker(),
 		},
-		webSeeds: make(map[string]*peer),
+		webSeeds: make(map[string]*Peer),
 	}
 	t._pendingPieces.NewSet = priorityBitmapStableNewSet
 	t.requestStrategy = cl.config.DefaultRequestStrategy(t.requestStrategyCallbacks(), &cl._mu)
@@ -1156,6 +1171,13 @@ func (cl *Client) AddTorrentSpec(spec *TorrentSpec) (t *Torrent, new bool, err e
 	return
 }
 
+type stringAddr string
+
+var _ net.Addr = stringAddr("")
+
+func (stringAddr) Network() string   { return "" }
+func (me stringAddr) String() string { return string(me) }
+
 // The trackers will be merged with the existing ones. If the Info isn't yet known, it will be set.
 // spec.DisallowDataDownload/Upload will be read and applied
 // The display name is replaced if the new spec provides one. Note that any `Storage` is ignored.
@@ -1170,12 +1192,19 @@ func (t *Torrent) MergeSpec(spec *TorrentSpec) error {
 		}
 	}
 	cl := t.cl
-	cl.AddDHTNodes(spec.DhtNodes)
+	cl.AddDhtNodes(spec.DhtNodes)
 	cl.lock()
 	defer cl.unlock()
 	useTorrentSources(spec.Sources, t)
 	for _, url := range spec.Webseeds {
 		t.addWebSeed(url)
+	}
+	for _, peerAddr := range spec.PeerAddrs {
+		t.addPeer(PeerInfo{
+			Addr:    stringAddr(peerAddr),
+			Source:  PeerSourceDirect,
+			Trusted: true,
+		})
 	}
 	if spec.ChunkSize != 0 {
 		t.setChunkSize(pp.Integer(spec.ChunkSize))
@@ -1285,7 +1314,7 @@ func (cl *Client) torrentsAsSlice() (ret []*Torrent) {
 }
 
 func (cl *Client) AddMagnet(uri string) (T *Torrent, err error) {
-	spec, err := TorrentSpecFromMagnetURI(uri)
+	spec, err := TorrentSpecFromMagnetUri(uri)
 	if err != nil {
 		return
 	}
@@ -1310,7 +1339,7 @@ func (cl *Client) DhtServers() []DhtServer {
 	return cl.dhtServers
 }
 
-func (cl *Client) AddDHTNodes(nodes []string) {
+func (cl *Client) AddDhtNodes(nodes []string) {
 	for _, n := range nodes {
 		hmp := missinggo.SplitHostMaybePort(n)
 		ip := net.ParseIP(hmp.Host)
@@ -1338,21 +1367,24 @@ func (cl *Client) banPeerIP(ip net.IP) {
 	cl.badPeerIPs[ip.String()] = struct{}{}
 }
 
-func (cl *Client) newConnection(nc net.Conn, outgoing bool, remoteAddr net.Addr, network, connString string) (c *PeerConn) {
+func (cl *Client) newConnection(nc net.Conn, outgoing bool, remoteAddr PeerRemoteAddr, network, connString string) (c *PeerConn) {
+	if network == "" {
+		panic(remoteAddr)
+	}
 	c = &PeerConn{
-		peer: peer{
+		Peer: Peer{
 			outgoing:        outgoing,
 			choking:         true,
 			peerChoking:     true,
 			PeerMaxRequests: 250,
 
 			RemoteAddr: remoteAddr,
-			network:    network,
+			Network:    network,
+			callbacks:  &cl.config.Callbacks,
 		},
 		connString:  connString,
 		conn:        nc,
 		writeBuffer: new(bytes.Buffer),
-		callbacks:   &cl.config.Callbacks,
 	}
 	c.peerImpl = c
 	c.logger = cl.logger.WithDefaultLevel(log.Warning).WithContextValue(c)
@@ -1363,6 +1395,9 @@ func (cl *Client) newConnection(nc net.Conn, outgoing bool, remoteAddr net.Addr,
 		r: c.r,
 	}
 	c.logger.WithDefaultLevel(log.Debug).Printf("initialized with remote %v over network %v (outgoing=%t)", remoteAddr, network, outgoing)
+	for _, f := range cl.config.Callbacks.NewPeer {
+		f(&c.Peer)
+	}
 	return
 }
 
@@ -1404,7 +1439,7 @@ func (cl *Client) eachListener(f func(Listener) bool) {
 	}
 }
 
-func (cl *Client) findListener(f func(net.Listener) bool) (ret net.Listener) {
+func (cl *Client) findListener(f func(Listener) bool) (ret Listener) {
 	cl.eachListener(func(l Listener) bool {
 		ret = l
 		return !f(l)
@@ -1429,7 +1464,7 @@ func (cl *Client) publicIp(peer net.IP) net.IP {
 
 func (cl *Client) findListenerIp(f func(net.IP) bool) net.IP {
 	l := cl.findListener(
-		func(l net.Listener) bool {
+		func(l Listener) bool {
 			return f(addrIpOrNil(l.Addr()))
 		},
 	)
@@ -1455,7 +1490,7 @@ func (cl *Client) ListenAddrs() (ret []net.Addr) {
 	return
 }
 
-func (cl *Client) onBadAccept(addr net.Addr) {
+func (cl *Client) onBadAccept(addr PeerRemoteAddr) {
 	ipa, ok := tryIpPortFromNetAddr(addr)
 	if !ok {
 		return

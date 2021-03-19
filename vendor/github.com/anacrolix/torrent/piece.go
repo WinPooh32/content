@@ -50,18 +50,20 @@ type Piece struct {
 
 	numVerifies         int64
 	hashing             bool
+	marking             bool
 	storageCompletionOk bool
 
 	publicPieceState PieceState
 	priority         piecePriority
 
+	// This can be locked when the Client lock is taken, but probably not vice versa.
 	pendingWritesMutex sync.Mutex
 	pendingWrites      int
 	noPendingWrites    sync.Cond
 
 	// Connections that have written data to this piece since its last check.
 	// This can include connections that have closed.
-	dirtiers map[*peer]struct{}
+	dirtiers map[*Peer]struct{}
 }
 
 func (p *Piece) String() string {
@@ -80,7 +82,7 @@ func (p *Piece) pendingChunkIndex(chunkIndex int) bool {
 	return !p._dirtyChunks.Contains(chunkIndex)
 }
 
-func (p *Piece) pendingChunk(cs chunkSpec, chunkSize pp.Integer) bool {
+func (p *Piece) pendingChunk(cs ChunkSpec, chunkSize pp.Integer) bool {
 	return p.pendingChunkIndex(chunkIndex(cs, chunkSize))
 }
 
@@ -135,12 +137,12 @@ func (p *Piece) chunkIndexDirty(chunk pp.Integer) bool {
 	return p._dirtyChunks.Contains(bitmap.BitIndex(chunk))
 }
 
-func (p *Piece) chunkIndexSpec(chunk pp.Integer) chunkSpec {
+func (p *Piece) chunkIndexSpec(chunk pp.Integer) ChunkSpec {
 	return chunkIndexSpec(chunk, p.length(), p.chunkSize())
 }
 
-func (p *Piece) chunkIndexRequest(chunkIndex pp.Integer) request {
-	return request{
+func (p *Piece) chunkIndexRequest(chunkIndex pp.Integer) Request {
+	return Request{
 		pp.Integer(p.index),
 		chunkIndexSpec(chunkIndex, p.length(), p.chunkSize()),
 	}
@@ -239,6 +241,8 @@ func (p *Piece) uncachedPriority() (ret piecePriority) {
 	return
 }
 
+// Tells the Client to refetch the completion status from storage, updating priority etc. if
+// necessary. Might be useful if you know the state of the piece data has changed externally.
 func (p *Piece) UpdateCompletion() {
 	p.t.cl.lock()
 	defer p.t.cl.unlock()
