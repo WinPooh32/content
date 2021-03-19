@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 
 	"github.com/WinPooh32/content/app"
 	"github.com/WinPooh32/content/delivery"
@@ -14,9 +15,21 @@ import (
 	"github.com/WinPooh32/content/service"
 
 	"github.com/go-chi/chi"
+	"github.com/go-chi/cors"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
+
+func prepareCors(origins []string) *cors.Cors {
+	return cors.New(cors.Options{
+		AllowedOrigins:   origins,
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+		ExposedHeaders:   []string{"Link"},
+		AllowCredentials: true,
+		MaxAge:           300, // Maximum value not ignored by any of major browsers
+	})
+}
 
 func osSignal() <-chan os.Signal {
 	c := make(chan os.Signal, 1)
@@ -59,13 +72,12 @@ func init() {
 
 func main() {
 	var err error
-	var r chi.Router
 
 	var s = service.New()
 
 	// Cmd flags.
-	var host *string = flag.String("host", "127.0.0.1", "host")
-	var port *uint = flag.Uint("port", 0, "port")
+	var host *string = flag.String("host", "127.0.0.1", "http host")
+	var port *uint = flag.Uint("port", 0, "http port")
 	var dir *string = flag.String("dir", "download", "root working directory")
 
 	var trackersPath *string = flag.String("trackers", "trackers.txt", "path to trackers list file")
@@ -73,6 +85,7 @@ func main() {
 	var readAhead *int64 = flag.Int64("size-readahead", 4, "readahead size MiB")
 	var maxConn *int64 = flag.Int64("max-connections", 50, "max connection per torrent")
 	var maxActive *int64 = flag.Int64("max-active", 4, "max active torrents")
+	var origins *string = flag.String("origins", "*", "CORS allowed origins")
 
 	// Parse console arguments.
 	flag.Parse()
@@ -98,19 +111,28 @@ func main() {
 	}
 	defer a.Close()
 
-	r, err = delivery.NewHttpAPI(a)
+	var router = chi.NewRouter()
+
+	router.Use(prepareCors(strings.Split(*origins, ",")).Handler)
+
+	var content chi.Router
+	content, err = delivery.NewHttpAPI(a)
 	if err != nil {
 		log.Fatal().Err(err).Msgf("init new http api")
 	}
 
-	err = s.Run(*host, uint16(*port), r)
+	router.Mount("/", content)
+
+	err = s.Run(*host, uint16(*port), router)
 	if err != nil {
 		log.Fatal().Err(err).Msgf("http service run")
 	}
 
 	select {
+
 	case <-osSignal():
 		s.Stop()
+
 	case err = <-s.Done():
 		if err != nil {
 			log.Error().Err(err).Msgf("service error")
